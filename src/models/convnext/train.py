@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision.models import convnext_base, ConvNeXt_Base_Weights
+from tqdm.auto import tqdm
 
 from prepare_data import train_loader, label_map
 
@@ -36,7 +37,13 @@ optimizer = torch.optim.Adam(
     lr=0.0001
 )
 
+
 for epoch in range(num_epochs):
+
+    progress = tqdm(
+        train_loader,
+        desc=f"Epoch {epoch + 1}/{num_epochs}"
+    )
 
     total_loss = 0
 
@@ -55,6 +62,7 @@ for epoch in range(num_epochs):
         optimizer.step()
 
         total_loss += loss.item()
+        progress.set_postfix(loss=f"{loss.item():.4f}")
 
     average_loss = total_loss / len(train_loader)
 
