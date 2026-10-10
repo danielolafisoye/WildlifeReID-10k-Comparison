@@ -1,0 +1,12 @@
+flask>=3.0
+flask-cors>=4.0
+numpy>=1.26
+pillow>=10.0
+pytest>=8.0
+
+# Only needed for the real models (REID_MODEL=convnext or miewid):
+# torch
+# torchvision
+# timm
+# transformers
+# faiss-cpu   # optional, for a large gallery
