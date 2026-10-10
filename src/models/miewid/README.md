@@ -9,6 +9,7 @@ src/models/
   common/data.py        metadata, validation split, transforms, dataset
   common/arcface.py     ArcFace identity head
   common/engine.py      embedding extraction, staged fine-tuning, query evaluation
+  common/prepare.py     one-off resized copy of the dataset
   common/retrieval.py   gallery search and the four open-set scores
   common/metrics.py     Top-1/5, mAP, BAKS, BAUS, normalised accuracy, AUROC, TNR@95TPR
   miewid/backbone.py    loads MiewID-msv3 and selects the layers to unfreeze
@@ -55,52 +56,73 @@ over the test queries whose identity is in the gallery.
 
 ## Running it on Google Colab
 
-Training needs a GPU: one CPU forward pass takes about a second per image and the dataset has 140,488.
-In Colab choose Runtime > Change runtime type > T4 GPU, then run these cells.
+Training needs a GPU. In Colab choose Runtime > Change runtime type > T4 GPU, then run these cells.
+
+**Cell 1: storage, code, libraries.** Run in every new session.
 
 ```python
 from google.colab import drive
 drive.mount("/content/drive")
 
-!git clone https://github.com/danielolafisoye/WildlifeReID-10k-Comparison.git
-%cd WildlifeReID-10k-Comparison
+%cd /content
+!git clone -b feature/miewid https://github.com/danielolafisoye/WildlifeReID-10k-Comparison.git
+%cd /content/WildlifeReID-10k-Comparison
 !pip install -q -r src/models/requirements.txt
 
-import kagglehub
-DATA = kagglehub.dataset_download("wildlifedatasets/wildlifereid-10k")
-RUN = "/content/drive/MyDrive/wildlife-reid/miewid"
+DRIVE = "/content/drive/MyDrive/wildlife-reid"
+RUN = f"{DRIVE}/miewid"
+DATA = "/content/wr10k_440"
 !mkdir -p {RUN}
+!nvidia-smi
 ```
 
-The dataset is a 26 GB download from Kaggle and is lost when the runtime is recycled, so that cell is rerun in
-every new session. Checkpoints go to Google Drive (`RUN`) so they survive.
+**Cell 2: dataset, first time only.** Colab has 2 CPU cores, and resizing 140,488 images to 440 x 440 on every
+pass is what makes training slow. This cell resizes them once and stores the result in Drive (about 7 GB).
 
 ```python
-# 1. Pretrained baseline (no training)
-!python src/models/miewid/evaluate.py --data-root {DATA} --out /content/eval_pretrained
-!cp /content/eval_pretrained/results.json {RUN}/results_pretrained.json
-
-# 2. Fine-tune
-!python src/models/miewid/train.py --data-root {DATA} --out {RUN}
-
-# 3. Fine-tuned model on the test split
-!python src/models/miewid/evaluate.py --data-root {DATA} --out /content/eval_finetuned --checkpoint {RUN}/best_backbone.pt
-!cp /content/eval_finetuned/results.json {RUN}/results_finetuned.json
+import kagglehub
+RAW = kagglehub.dataset_download("wildlifedatasets/wildlifereid-10k")
+!python src/models/common/prepare.py --data-root {RAW} --out {DATA} --size 440
+!tar -cf {DRIVE}/wr10k_440.tar -C /content wr10k_440
 ```
 
-- If the session disconnects during step 2, run the setup cell again and add `--resume` to the step 2 command.
-- If the GPU runs out of memory, add `--batch-size 16`.
-- The repository must be cloned with a personal access token while it is private.
-- The scripts need `transformers` 4.x, which the `pip install` line takes care of. MiewID does not load with 5.x.
+If the session drops while it is resizing, run Cell 1 and this cell again.
+
+**Cell 2, every later session.** Restores the resized copy from Drive instead of rebuilding it.
+
+```python
+!tar -xf {DRIVE}/wr10k_440.tar -C /content
+!ls {DATA}
+```
+
+**Cells 3 to 5: the experiment.**
+
+```python
+!python src/models/miewid/evaluate.py --data-root {DATA} --out {RUN}/eval_pretrained
+```
+
+```python
+!python src/models/miewid/train.py --data-root {DATA} --out {RUN} --epochs 3 --resume
+```
+
+```python
+!python src/models/miewid/evaluate.py --data-root {DATA} --out {RUN}/eval_finetuned --checkpoint {RUN}/best_backbone.pt
+```
+
+All three continue from where they stopped: after a disconnect, run Cell 1, the restore cell, and the same
+command again. If the GPU runs out of memory during training, add `--batch-size 16`.
 
 Outputs in `RUN`:
 
+- `eval_pretrained/results.json` and `eval_finetuned/results.json`: every number for the report, including
+  model time per image and parameter count.
 - `best_backbone.pt`: fine-tuned weights. Serve them with `REID_MODEL=miewid REID_CHECKPOINT=<path>`.
 - `history.json`: loss and validation metrics per epoch.
-- `results_*.json`: every number for the report, including model time per image and parameter count.
-- `last.pt`: the resume point (about 520 MB; delete it once training is finished).
+- `last.pt` and `eval_*/embeddings_*.npz`: resume points (about 3 GB together; delete them when finished).
 
 Adding `--export-gallery <folder>` to `evaluate.py` writes the gallery index the Flask API loads.
+
+The scripts need `transformers` 4.x, which the `pip install` line takes care of. MiewID does not load with 5.x.
 
 To check a change on a laptop before pushing, run the same scripts on a few identities with
 `--limit-identities 12 --epochs 1 --batch-size 4 --workers 0`.
@@ -111,5 +133,7 @@ To check a change on a laptop before pushing, run the same scripts on a few iden
   are not a leakage-free measurement.
 - The validation thresholds are chosen against a gallery of 84,906 images; at test time the gallery is the full
   109,927-image training split.
+- Training and evaluation read a copy of the dataset resized once to 440 x 440 and stored as JPEG (quality 92),
+  so pixels differ very slightly from resizing the original files at query time.
 - The no-date part of the validation holdout orders images by `cluster_id`, which only approximates the
   benchmark's similarity-aware split.

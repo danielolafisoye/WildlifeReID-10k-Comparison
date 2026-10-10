@@ -29,7 +29,7 @@ def pick_device(name: str = "auto") -> str:
 def embed_images(
     backbone: nn.Module, df: pd.DataFrame, root: Path, size: int, batch_size: int, device: str, workers: int, desc: str
 ) -> tuple[np.ndarray, float]:
-    loader = DataLoader(ReIDDataset(df, root, build_transform(size, train=False)), batch_size=batch_size, num_workers=workers)
+    loader = DataLoader(ReIDDataset(df, root, build_transform(size, train=False)), batch_size=batch_size, num_workers=workers, pin_memory=device == "cuda")
     backbone.eval()
     chunks, seconds = [], 0.0
     for images, _ in tqdm(loader, desc=desc):
@@ -42,6 +42,36 @@ def embed_images(
         seconds += time.perf_counter() - started
         chunks.append(F.normalize(out.float(), dim=1).cpu().numpy())
     return np.concatenate(chunks), 1000 * seconds / max(1, len(df))
+
+
+def embed_images_resumable(
+    backbone: nn.Module, df: pd.DataFrame, root: Path, size: int, batch_size: int, device: str, workers: int,
+    cache_dir: Path, tag: str, chunk: int = 10000,
+) -> tuple[np.ndarray, float]:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    info_file = cache_dir / "embeddings.json"
+    info = {"tag": tag, "images": len(df), "chunk": chunk}
+    if not info_file.exists() or json.loads(info_file.read_text()) != info:
+        for stale in cache_dir.glob("embeddings_*.npz"):
+            stale.unlink()
+        info_file.write_text(json.dumps(info))
+
+    parts, total_ms = [], 0.0
+    starts = range(0, len(df), chunk)
+    for i, start in enumerate(starts):
+        part_file = cache_dir / f"embeddings_{i:03d}.npz"
+        rows = df.iloc[start : start + chunk]
+        if part_file.exists():
+            part = np.load(part_file)
+            emb, ms = part["emb"], float(part["ms"])
+        else:
+            emb, ms = embed_images(backbone, rows, root, size, batch_size, device, workers, f"embedding {i + 1}/{len(starts)}")
+            tmp = cache_dir / f"partial_{i:03d}.npz"
+            np.savez(tmp, emb=emb, ms=ms)
+            tmp.replace(part_file)
+        parts.append(emb)
+        total_ms += ms * len(rows)
+    return np.concatenate(parts), total_ms / max(1, len(df))
 
 
 def evaluate_queries(

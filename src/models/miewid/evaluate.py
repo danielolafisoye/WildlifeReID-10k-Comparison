@@ -8,7 +8,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common.data import FIT, TEST, VAL_KNOWN, VAL_UNKNOWN, limit_identities, load_metadata, make_validation_split  # noqa: E402
-from common.engine import DEFAULT_WORKERS, embed_images, evaluate_queries, pick_device  # noqa: E402
+from common.engine import DEFAULT_WORKERS, embed_images_resumable, evaluate_queries, pick_device  # noqa: E402
 from common.retrieval import SCORES  # noqa: E402
 from backbone import INPUT_SIZE, MODEL_ID, build_backbone  # noqa: E402
 
@@ -16,7 +16,7 @@ from backbone import INPUT_SIZE, MODEL_ID, build_backbone  # noqa: E402
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate MiewID on the official WildlifeReID-10k test split.")
     parser.add_argument("--data-root", required=True, type=Path)
-    parser.add_argument("--out", required=True, type=Path, help="results.json and the embedding cache go here")
+    parser.add_argument("--out", required=True, type=Path, help="results.json and the resumable embedding cache go here")
     parser.add_argument("--checkpoint", default="", help="fine-tuned backbone; omit for the pretrained baseline")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
@@ -34,15 +34,9 @@ def main() -> None:
     df = make_validation_split(df, seed=args.seed).reset_index(drop=True)
 
     backbone = build_backbone(args.checkpoint).to(device)
-    cache, cache_info = args.out / "embeddings.npy", args.out / "embeddings.json"
-    info = json.loads(cache_info.read_text()) if cache.exists() and cache_info.exists() else {}
-    if info.get("checkpoint") == args.checkpoint and info.get("images") == len(df):
-        emb, ms_per_image = np.load(cache), info["ms_per_image"]
-        print(f"reusing cached embeddings from {cache}")
-    else:
-        emb, ms_per_image = embed_images(backbone, df, args.data_root, INPUT_SIZE, args.batch_size, device, args.workers, "embedding")
-        np.save(cache, emb)
-        cache_info.write_text(json.dumps({"checkpoint": args.checkpoint, "images": len(df), "ms_per_image": ms_per_image}))
+    emb, ms_per_image = embed_images_resumable(
+        backbone, df, args.data_root, INPUT_SIZE, args.batch_size, device, args.workers, args.out, args.checkpoint or "pretrained"
+    )
 
     def rows(*roles: str) -> np.ndarray:
         return df["role"].isin(roles).to_numpy()
