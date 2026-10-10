@@ -39,9 +39,14 @@ class WildlifeDataset(Dataset):
 
         # Resize, crop, tensor, normalize
         image = self.transform(image)
-
+        
         # Correct animal identity
-        label = label_map[row["identity"]]
+        identity = row["identity"]
+
+        if identity in label_map:
+            label = label_map[identity]
+        else:
+            label = -1 
 
         return image, label
 

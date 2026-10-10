@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision.models import convnext_base
+import torch.nn.functional as F
 
 from prepare_data import test_loader, label_map
 
@@ -29,30 +30,25 @@ correct_top5 = 0
 total = 0
 
 
+threshold = 0.5  # example only
+
+model.eval()
+
 with torch.no_grad():
 
     for images, labels in test_loader:
 
-        predictions = model(images)
+        outputs = model(images)
 
-        # Top 1
-        top1 = predictions.argmax(dim=1)
+        # Convert outputs to probabilities
+        probabilities = F.softmax(outputs, dim=1)
 
-        correct_top1 += (top1 == labels).sum().item()
+        # Highest confidence + predicted identity
+        confidence, predictions = probabilities.max(dim=1)
 
+        # Anything below threshold becomes UNKNOWN
+        predictions[confidence < threshold] = -1
 
-        # Top 5
-        top5 = predictions.topk(5, dim=1).indices
-
-        correct_top5 += (
-            top5 == labels.unsqueeze(1)
-        ).any(dim=1).sum().item()
-
-        total += labels.size(0)
-
-
-top1_accuracy = correct_top1 / total
-top5_accuracy = correct_top5 / total
-
-print(f"Top 1 Accuracy: {top1_accuracy * 100:.2f}%")
-print(f"Top 5 Accuracy: {top5_accuracy * 100:.2f}%")
+        print("Predictions:", predictions)
+        print("Actual labels:", labels)
+        print("Confidence:", confidence)
