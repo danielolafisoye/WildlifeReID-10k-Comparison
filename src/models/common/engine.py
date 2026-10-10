@@ -159,6 +159,15 @@ def fit(backbone: nn.Module, unfrozen: list[nn.Parameter], df: pd.DataFrame, cfg
 
     last_path = out_dir / "last.pt"
     history, start_epoch, best = [], 0, -1.0
+
+    def save_last(epoch: int) -> None:
+        torch.save(
+            {"backbone": backbone.state_dict(), "head": head.state_dict(), "optimiser": optimiser.state_dict(),
+             "scheduler": scheduler.state_dict(), "history": history, "epoch": epoch, "best": best},
+            last_path,
+        )
+        (out_dir / "history.json").write_text(json.dumps({"config": asdict(cfg), "history": history}, indent=2), encoding="utf-8")
+
     if resume and last_path.exists():
         state = torch.load(last_path, map_location=device, weights_only=False)
         backbone.load_state_dict(state["backbone"])
@@ -178,6 +187,7 @@ def fit(backbone: nn.Module, unfrozen: list[nn.Parameter], df: pd.DataFrame, cfg
         prototypes = torch.zeros(len(classes), embedding_dim).index_add_(0, torch.from_numpy(labels), torch.from_numpy(fit_emb))
         head.init_from_prototypes(prototypes.to(device))
         _train_head_on_cached(head, fit_emb, labels, cfg.head_epochs, cfg.lr_head, device)
+        save_last(0)
 
     for epoch in range(start_epoch, cfg.epochs):
         head.train()
@@ -204,11 +214,6 @@ def fit(backbone: nn.Module, unfrozen: list[nn.Parameter], df: pd.DataFrame, cfg
         if metrics["normalised_accuracy"] > best:
             best = metrics["normalised_accuracy"]
             save_best(metrics, epoch + 1)
-        torch.save(
-            {"backbone": backbone.state_dict(), "head": head.state_dict(), "optimiser": optimiser.state_dict(),
-             "scheduler": scheduler.state_dict(), "history": history, "epoch": epoch + 1, "best": best},
-            last_path,
-        )
-        (out_dir / "history.json").write_text(json.dumps({"config": asdict(cfg), "history": history}, indent=2), encoding="utf-8")
+        save_last(epoch + 1)
 
     return {"history": history, "best_val_normalised_accuracy": best}
