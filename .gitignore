@@ -32,3 +32,6 @@ data/*
 !data/samples/
 !data/samples/**
 !data/dataset_url.txt
+
+# Training runs and logs
+runs/

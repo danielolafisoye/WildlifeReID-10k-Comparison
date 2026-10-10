@@ -16,8 +16,9 @@ User image -> React app -> Flask REST API -> preprocessing -> selected ReID mode
 | Upload validation, preprocessing, gallery search, open-set threshold | Working |
 | React UI (drop zone, threshold slider, Top-5 results, unknown message) | Working |
 | `dummy` embedder | Weight-free stand-in (compares coarse colour layout). Not a real re-id model |
-| `convnext` / `miewid` embedders | Wired in but **untested**: need `torch`, `timm`, `transformers` and weights |
-| Training / fine-tuning, ArcFace head, metrics (Top-1/5, mAP, BAKS, BAUS, AUROC) | **Not included**. This is the experimental part of the project |
+| `miewid` embedder | Working with pretrained or fine-tuned weights. Needs `torch`, `timm`, `transformers<5` |
+| `convnext` embedder | Wired in but **untested** |
+| Training / fine-tuning, ArcFace head, metrics (Top-1/5, mAP, BAKS, BAUS, AUROC) | Code in `src/models/` (see `src/models/miewid/README.md`), smoke-tested on a 217-image subset. **Full GPU runs not done yet**; ConvNeXt not started |
 
 ## Run it
 
@@ -113,7 +114,6 @@ src/frontend/
 2. Fine-tune each backbone with an ArcFace head, then save the backbone weights (staged unfreezing as in the proposal).
 3. Build one gallery per model with `build_gallery.py` and choose each model's threshold on a validation split.
 4. Compute Top-1, Top-5, mAP, BAKS, BAUS and AUROC, then set `REID_MODEL` to the winner.
-5. Check the MiewID model id and input size in `reid/model.py` against its official model card.
 
 The repo's `src/models/convnext/` and `src/models/miewid/` folders are for the training code. The embedders used
 for serving live in `src/backend/reid/model.py`; load the fine-tuned backbone weights there via `REID_CHECKPOINT`.

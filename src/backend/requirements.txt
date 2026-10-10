@@ -8,5 +8,5 @@ pytest>=8.0
 # torch
 # torchvision
 # timm
-# transformers
+# transformers>=4.44,<5   (MiewID does not load with transformers 5.x)
 # faiss-cpu   # optional, for a large gallery

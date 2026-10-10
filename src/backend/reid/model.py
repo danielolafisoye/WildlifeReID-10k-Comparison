@@ -81,10 +81,11 @@ class ConvNeXtEmbedder(_TorchEmbedder):
 
 
 class MiewIDEmbedder(_TorchEmbedder):
-    """MiewID-msv3 (EfficientNetV2 backbone, Sub-center ArcFace).
+    """MiewID-msv3 (EfficientNetV2 backbone, Sub-center ArcFace), 2152-d embeddings.
 
-    TODO: confirm the model id and expected input size against the official model card
-    (reference [8] in the proposal) before relying on the numbers below.
+    Model id and 440 x 440 input confirmed against the official model card (reference [8] in the
+    proposal). Its loading code needs transformers 4.x. Fine-tuned weights come from
+    src/models/miewid/train.py (best_backbone.pt).
     """
 
     name = "miewid"
