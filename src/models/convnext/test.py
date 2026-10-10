@@ -1,97 +1,77 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torchvision.models import convnext_base
+from torchvision.models import convnext_base, ConvNeXt_Base_Weights
+from tqdm.auto import tqdm
 
-from prepare_data import test_loader, label_map
+from prepare_data import train_loader, label_map
 
+num_epochs = 15
+scaler = torch.amp.GradScaler("cuda")
 
-# Number of identities the model learned during training
+# Choose GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Training on:", device, flush=True)
+
+# Number of animal identities
 num_classes = len(label_map)
 
+# Load pretrained ConvNeXt
+model = convnext_base(
+    weights=ConvNeXt_Base_Weights.DEFAULT
+)
 
-# Recreate ConvNeXt
-model = convnext_base(weights=None)
-
+# Replace ImageNet classifier
 model.classifier[2] = nn.Linear(
     model.classifier[2].in_features,
     num_classes
 )
 
+# Move model to GPU
+model = model.to(device)
 
-# Load trained weights
-model.load_state_dict(
-    torch.load("convnext_weights.pth")
+# Loss
+loss_function = nn.CrossEntropyLoss()
+
+# Optimizer
+optimizer = torch.optim.Adam(
+    model.parameters(),
+    lr=0.0001
 )
 
-model.eval()
 
+for epoch in range(num_epochs):
 
-# Example threshold
-threshold = 0.5
+    progress = tqdm(
+        train_loader,
+        desc=f"Epoch {epoch + 1}/{num_epochs}"
+    )
 
+    total_loss = 0
 
-correct = 0
-total = 0
+    for images, labels in progress:
 
-known_correct = 0
-known_total = 0
+        # Move images and labels to GPU
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
 
-unknown_correct = 0
-unknown_total = 0
+        optimizer.zero_grad(set_to_none=True)
+        # AMP
+        with torch.amp.autocast("cuda"):
+            predictions = model(images)
+            loss = loss_function(predictions, labels)
 
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
-with torch.no_grad():
+        total_loss += loss.item()
+        progress.set_postfix(loss=f"{loss.item():.4f}")
 
-    for images, labels in test_loader:
+    average_loss = total_loss / len(train_loader)
 
-        # Model predicts
-        outputs = model(images)
+    print(
+        f"Epoch {epoch + 1}/{num_epochs} Loss: {average_loss:.4f}",
+        flush=True
+    )
 
-        # Convert outputs into probabilities
-        probabilities = F.softmax(outputs, dim=1)
-
-        # Get highest probability
-        confidence, predictions = probabilities.max(dim=1)
-
-        # Low confidence = UNKNOWN
-        predictions[confidence < threshold] = -1
-
-
-        # Overall accuracy
-        correct += (predictions == labels).sum().item()
-        total += labels.size(0)
-
-
-        # Known animals
-        known_mask = labels != -1
-
-        known_correct += (
-            predictions[known_mask] == labels[known_mask]
-        ).sum().item()
-
-        known_total += known_mask.sum().item()
-
-
-        # Unknown animals
-        unknown_mask = labels == -1
-
-        unknown_correct += (
-            predictions[unknown_mask] == -1
-        ).sum().item()
-
-        unknown_total += unknown_mask.sum().item()
-
-
-# Results
-overall_accuracy = correct / total
-
-print(f"Overall Accuracy: {overall_accuracy * 100:.2f}%")
-
-if known_total > 0:
-    known_accuracy = known_correct / known_total
-    print(f"Known Animal Accuracy: {known_accuracy * 100:.2f}%")
-
-if unknown_total > 0:
-    unknown_accuracy = unknown_correct / unknown_total
-    print(f"Unknown Detection Accuracy: {unknown_accuracy * 100:.2f}%")
+torch.save(model.state_dict(), "convnext_weights.pth")

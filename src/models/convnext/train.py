@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 from torchvision.models import convnext_base, ConvNeXt_Base_Weights
@@ -5,7 +8,8 @@ from tqdm.auto import tqdm
 
 from prepare_data import train_loader, label_map
 
-num_epochs = 100
+num_epochs = 15
+scaler = torch.amp.GradScaler("cuda")
 
 # Choose GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -50,16 +54,18 @@ for epoch in range(num_epochs):
     for images, labels in progress:
 
         # Move images and labels to GPU
-        images = images.to(device)
-        labels = labels.to(device)
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
 
-        predictions = model(images)
+        optimizer.zero_grad(set_to_none=True)
+        # AMP
+        with torch.amp.autocast("cuda"):
+            predictions = model(images)
+            loss = loss_function(predictions, labels)
 
-        loss = loss_function(predictions, labels)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         total_loss += loss.item()
         progress.set_postfix(loss=f"{loss.item():.4f}")
@@ -71,4 +77,14 @@ for epoch in range(num_epochs):
         flush=True
     )
 
-torch.save(model.state_dict(), "convnext_weights.pth")
+output_dir = Path(__file__).resolve().parent
+
+torch.save(model.state_dict(), output_dir / "convnext_weights.pth")
+
+label_data = {
+    "index_to_identity": list(label_map.keys()),
+    "identity_to_index": label_map,
+}
+
+with (output_dir / "label_map.json").open("w", encoding="utf-8") as file:
+    json.dump(label_data, file, indent=2)
