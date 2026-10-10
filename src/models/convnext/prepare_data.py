@@ -5,12 +5,11 @@ from torch.utils.data import Dataset, DataLoader
 
 to_tensor = ToTensor()
 
-df = pd.read_csv("../../data/metadata.csv")
+DATA_ROOT = "/root/.cache/kagglehub/datasets/wildlifedatasets/wildlifereid-10k/versions/10"
+df = pd.read_csv(f"{DATA_ROOT}/metadata.csv", low_memory=False)
 
 train_df = df[df["split"] == "train"]
 test_df = df[df["split"] == "test"]
-
-DATA_ROOT = "../../data"  
 
 identities = train_df["identity"].unique()
 
