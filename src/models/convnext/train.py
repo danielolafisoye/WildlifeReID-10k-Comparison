@@ -6,15 +6,17 @@ from prepare_data import train_loader, label_map
 
 num_epochs = 100
 
+# Choose GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Training on:", device, flush=True)
+
 # Number of animal identities
 num_classes = len(label_map)
-
 
 # Load pretrained ConvNeXt
 model = convnext_base(
     weights=ConvNeXt_Base_Weights.DEFAULT
 )
-
 
 # Replace ImageNet classifier
 model.classifier[2] = nn.Linear(
@@ -22,9 +24,11 @@ model.classifier[2] = nn.Linear(
     num_classes
 )
 
+# Move model to GPU
+model = model.to(device)
+
 # Loss
 loss_function = nn.CrossEntropyLoss()
-
 
 # Optimizer
 optimizer = torch.optim.Adam(
@@ -32,12 +36,15 @@ optimizer = torch.optim.Adam(
     lr=0.0001
 )
 
-
 for epoch in range(num_epochs):
 
     total_loss = 0
 
     for images, labels in train_loader:
+
+        # Move images and labels to GPU
+        images = images.to(device)
+        labels = labels.to(device)
 
         predictions = model(images)
 
@@ -51,6 +58,9 @@ for epoch in range(num_epochs):
 
     average_loss = total_loss / len(train_loader)
 
-    print(f"Epoch {epoch + 1}/{num_epochs} Loss: {average_loss:.4f}")
+    print(
+        f"Epoch {epoch + 1}/{num_epochs} Loss: {average_loss:.4f}",
+        flush=True
+    )
 
 torch.save(model.state_dict(), "convnext_weights.pth")
