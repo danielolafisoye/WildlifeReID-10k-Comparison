@@ -178,3 +178,13 @@ button.primary:disabled {
     grid-template-columns: 1fr 80px 56px;
   }
 }
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

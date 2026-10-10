@@ -118,8 +118,15 @@ def evaluate_main(model) -> None:
     if args.export_gallery:
         gallery_df = df[test_g]
         args.export_gallery.mkdir(parents=True, exist_ok=True)
-        np.save(args.export_gallery / "embeddings.npy", emb[test_g])
-        meta = {"identities": gallery_df["identity"].tolist(), "image_ids": gallery_df["path"].tolist(), "model": model.NAME}
+        np.save(args.export_gallery / "embeddings.npy", emb[test_g].astype(np.float16))
+        served = ("max_sim", "margin")
+        meta = {
+            "identities": gallery_df["identity"].tolist(),
+            "image_ids": gallery_df["path"].tolist(),
+            "model": model.NAME,
+            "thresholds": {name: open_set[name]["threshold"] for name in served},
+            "default_score": max(served, key=lambda name: open_set[name]["validation"]["normalised_accuracy"]),
+        }
         (args.export_gallery / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
         print(f"gallery for the API written to {args.export_gallery}")
 

@@ -70,16 +70,25 @@ export default function App() {
 
         {threshold !== null && (
           <label className="threshold">
-            Unknown-individual threshold: <strong>{Number(threshold).toFixed(2)}</strong>
+            {config.score === "margin" ? "Minimum lead over the second-best match" : "Minimum similarity to the best match"}
+            : <strong>{Number(threshold).toFixed(3)}</strong>
             <input
               type="range"
               min="0"
-              max="1"
-              step="0.01"
+              max={config.threshold_max}
+              step="0.005"
               value={threshold}
               onChange={(e) => setThreshold(Number(e.target.value))}
               disabled={loading}
             />
+            <span className="muted small">
+              Below this the animal is reported as unknown. The starting value was chosen on validation data.{" "}
+              {threshold !== config.threshold && (
+                <button type="button" className="link" onClick={() => setThreshold(config.threshold)}>
+                  Reset
+                </button>
+              )}
+            </span>
           </label>
         )}
 

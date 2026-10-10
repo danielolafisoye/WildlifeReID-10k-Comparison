@@ -14,10 +14,10 @@ class Config:
 
     GALLERY_DIR = Path(os.getenv("REID_GALLERY_DIR", BASE_DIR / "data" / "gallery"))
 
-    # Open-set threshold tau. The WildlifeReID-10k paper reports a stable region of about
-    # 0.6-0.7 for MiewID; treat this only as a starting point and tune per model on a
-    # validation split built from the training identities.
-    THRESHOLD = float(os.getenv("REID_THRESHOLD", "0.65"))
+    # Open-set score (max_sim or margin) and its threshold tau. Left empty, both come from the
+    # exported gallery, where they were chosen on validation data for the model being served.
+    SCORE = os.getenv("REID_SCORE", "")
+    THRESHOLD = float(os.environ["REID_THRESHOLD"]) if os.getenv("REID_THRESHOLD") else None
     TOP_K = int(os.getenv("REID_TOP_K", "5"))
 
     MAX_UPLOAD_MB = int(os.getenv("REID_MAX_UPLOAD_MB", "10"))

@@ -12,7 +12,7 @@ from flask_cors import CORS
 from config import Config
 from reid.gallery import Gallery
 from reid.model import load_embedder
-from reid.openset import decide
+from reid.openset import FALLBACK_THRESHOLDS, SCORES, decide
 from reid.preprocessing import InvalidImageError, load_image
 
 
@@ -24,6 +24,15 @@ def create_app(config=Config, embedder=None, gallery=None) -> Flask:
     # Loaded once at start-up, not per request (gallery embeddings are precomputed).
     app.extensions["embedder"] = embedder or load_embedder(config.MODEL_NAME, config.DEVICE, config.CHECKPOINT)
     app.extensions["gallery"] = gallery if gallery is not None else Gallery.load(config.GALLERY_DIR)
+
+    gallery_default = app.extensions["gallery"].default_score
+    score_name = config.SCORE or (gallery_default if gallery_default in SCORES else "max_sim")
+    if score_name not in SCORES:
+        raise ValueError(f"Unknown REID_SCORE '{score_name}'. Use one of: {', '.join(SCORES)}.")
+    default_threshold = config.THRESHOLD
+    if default_threshold is None:
+        default_threshold = app.extensions["gallery"].thresholds.get(score_name, FALLBACK_THRESHOLDS[score_name])
+    default_threshold = round(float(default_threshold), 4)
 
     def error(message: str, status: int):
         return jsonify({"error": message}), status
@@ -41,7 +50,9 @@ def create_app(config=Config, embedder=None, gallery=None) -> Flask:
     @app.get("/api/config")
     def get_config():
         return jsonify({
-            "threshold": config.THRESHOLD,
+            "threshold": default_threshold,
+            "score": score_name,
+            "threshold_max": 1.0 if score_name == "max_sim" else 0.5,
             "top_k": config.TOP_K,
             "max_upload_mb": config.MAX_UPLOAD_MB,
             "allowed_extensions": sorted(config.ALLOWED_EXTENSIONS),
@@ -57,7 +68,7 @@ def create_app(config=Config, embedder=None, gallery=None) -> Flask:
             return error(f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(config.ALLOWED_EXTENSIONS))}.", 415)
 
         try:
-            threshold = float(request.form.get("threshold", config.THRESHOLD))
+            threshold = float(request.form.get("threshold", default_threshold))
         except ValueError:
             return error("threshold must be a number.", 400)
 
@@ -68,14 +79,17 @@ def create_app(config=Config, embedder=None, gallery=None) -> Flask:
             return error(str(exc), 400)
 
         query = app.extensions["embedder"].embed(image)  # 2-3. preprocess + embedding
-        candidates = app.extensions["gallery"].search(query, config.TOP_K)  # 4-5. similarity search + ranking
-        decision = decide(candidates, threshold)  # 6. open-set threshold
+        candidates = app.extensions["gallery"].search(query, max(config.TOP_K, 2))  # 4-5. similarity search + ranking
+        decision = decide(candidates, threshold, score_name)  # 6. open-set threshold
+        candidates = candidates[: config.TOP_K]
 
         return jsonify({  # 7. JSON result
             "status": decision["status"],
             "prediction": {"identity": decision["identity"], "score": decision["score"]},
             "reason": decision["reason"],
             "top_k": candidates,
+            "score": score_name,
+            "decision_score": decision["decision_score"],
             "threshold": threshold,
             "model": app.extensions["embedder"].name,
             "inference_ms": round((time.perf_counter() - started) * 1000, 1),

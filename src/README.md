@@ -1,26 +1,26 @@
-# Wildlife Re-Identification: Flask API + React front end
+# Wildlife Re-Identification: models, Flask API and React front end
 
-Scaffold for the Big Data Analytics project: open-set animal re-identification on WildlifeReID-10k,
-comparing MiewID and ConvNeXt Base, then serving the better model behind a REST API and a web app.
+Open-set animal re-identification on WildlifeReID-10k. MiewID and ConvNeXt Base are fine-tuned and evaluated
+under one protocol, and the better one is served behind a REST API with a web app.
 
 ```
 User image -> React app -> Flask REST API -> preprocessing -> selected ReID model
-           -> cosine similarity vs gallery -> open-set threshold -> JSON -> React
+           -> cosine similarity vs gallery -> open-set rule -> JSON -> React
 ```
 
-## What works now, and what is a placeholder
+## What is where
 
-| Part | State |
-|---|---|
-| Flask API (`/api/predict`, `/api/health`, `/api/config`) | Working, tested (7 tests) |
-| Upload validation, preprocessing, gallery search, open-set threshold | Working |
-| React UI (drop zone, threshold slider, Top-5 results, unknown message) | Working |
-| `dummy` embedder | Weight-free stand-in (compares coarse colour layout). Not a real re-id model |
-| `miewid` embedder | Working with pretrained or fine-tuned weights. Needs `torch`, `timm`, `transformers<5` |
-| `convnext` embedder | Wired in but **untested** |
-| Training / fine-tuning, ArcFace head, metrics (Top-1/5, mAP, BAKS, BAUS, AUROC) | Code in `src/models/` (see `src/models/miewid/README.md`), smoke-tested on a 217-image subset. **Full GPU runs not done yet**; ConvNeXt not started |
+| Part | Location | State |
+|---|---|---|
+| Shared protocol: split, ArcFace training, retrieval, metrics | `src/models/common/` | Working |
+| MiewID | `src/models/miewid/` | Trained and evaluated on the full dataset |
+| ConvNeXt Base | `src/models/convnext/` | Code ready, smoke-tested; full run not done yet |
+| Flask API | `src/backend/` | Working, 9 tests |
+| React UI | `src/frontend/` | Working |
 
-## Run it
+How to train and evaluate is in `src/models/miewid/README.md` and `src/models/convnext/README.md`.
+
+## Run the app
 
 Backend (port 5000):
 
@@ -40,27 +40,45 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173.
+Open http://localhost:5173. Without a model and gallery the API runs a weight-free `dummy` embedder and every
+query returns "unknown", which is enough to check that the two halves talk to each other.
 
-## Build a gallery
+## Serve a trained model
 
-The gallery is the set of known individuals the query is compared against. Put images in one folder per identity:
+The API needs three things from a finished training run: the fine-tuned weights, the gallery of known
+individuals, and the open-set rule with its threshold. The evaluation script exports the last two together.
 
-```
-gallery_images/
-    zebra_001/img_a.jpg
-    zebra_001/img_b.jpg
-    leopard_017/img_c.jpg
-```
+1. In Colab, after the fine-tuned evaluation has finished, run it once more with `--export-gallery`. The
+   embeddings are already cached, so this takes a few minutes:
 
-then, from `src/backend/`:
+   ```python
+   !python src/models/miewid/evaluate.py --data-root {DATA} --out {RUN}/eval_finetuned --checkpoint {RUN}/best_backbone.pt --export-gallery {RUN}/deploy
+   ```
 
-```bash
-python scripts/build_gallery.py --images gallery_images --model dummy
-```
+2. Download `deploy/embeddings.npy`, `deploy/meta.json` and `best_backbone.pt` from Google Drive. Put the first
+   two in `src/backend/data/gallery/` and the weights anywhere, for example `src/backend/data/best_backbone.pt`.
 
-This writes `src/backend/data/gallery/embeddings.npy` and `meta.json`. Restart the API to load it. With an empty gallery
-every query returns "unknown" (reason `gallery_empty`).
+3. Install the model libraries and start the API with the model selected:
+
+   ```bat
+   pip install -r ..\models\requirements.txt
+   set REID_MODEL=miewid
+   set REID_CHECKPOINT=data\best_backbone.pt
+   python app.py
+   ```
+
+For ConvNeXt use `src/models/convnext/evaluate_reid.py` and `REID_MODEL=convnext`. The gallery must come from the
+same model and checkpoint that the API loads.
+
+## Open-set rule
+
+`meta.json` carries the rule and threshold that scored best on validation data, so the API applies what the
+experiment found instead of a hand-picked number.
+
+| Score | Accept the best match when | 
+|---|---|
+| `max_sim` | its similarity is at least the threshold (the rule in the proposal) |
+| `margin` | it is ahead of the second-best individual by at least the threshold |
 
 ## API
 
@@ -71,15 +89,20 @@ every query returns "unknown" (reason `gallery_empty`).
   "status": "known",
   "prediction": { "identity": "zebra_001", "score": 0.83 },
   "reason": null,
-  "top_k": [ { "identity": "zebra_001", "score": 0.83, "image_id": "zebra_001/img_a.jpg" } ],
-  "threshold": 0.65,
+  "top_k": [ { "identity": "zebra_001", "score": 0.83, "image_id": "images/.../a.jpg" } ],
+  "score": "margin",
+  "decision_score": 0.21,
+  "threshold": 0.091,
   "model": "miewid",
   "inference_ms": 41.2
 }
 ```
 
-When no match reaches the threshold: `"status": "unknown"`, `"reason": "below_threshold"` (or `"gallery_empty"`).
+When the rule rejects the match: `"status": "unknown"`, `"reason": "below_threshold"` (or `"gallery_empty"`).
 Errors return `{ "error": "..." }` with 400 (bad/missing image), 413 (too large) or 415 (wrong file type).
+
+`GET /api/health` reports the model and gallery size. `GET /api/config` reports the rule, its threshold and the
+upload limits for the UI.
 
 ## Configuration (environment variables)
 
@@ -87,33 +110,16 @@ Errors return `{ "error": "..." }` with 400 (bad/missing image), 413 (too large)
 |---|---|---|
 | `REID_MODEL` | `dummy` | `dummy`, `convnext` or `miewid` |
 | `REID_DEVICE` | `cpu` | `cpu` or `cuda` |
-| `REID_CHECKPOINT` | empty | fine-tuned backbone weights |
-| `REID_THRESHOLD` | `0.65` | open-set threshold tau. The paper's 0.6-0.7 region for MiewID is only a starting point; tune per model on validation data |
+| `REID_CHECKPOINT` | empty | fine-tuned backbone weights (`best_backbone.pt`); empty = pretrained weights |
+| `REID_GALLERY_DIR` | `src/backend/data/gallery` | folder holding `embeddings.npy` and `meta.json` |
+| `REID_SCORE` | empty | `max_sim` or `margin`; empty = the rule stored in the gallery |
+| `REID_THRESHOLD` | empty | threshold; empty = the validated threshold stored in the gallery |
 | `REID_TOP_K` | `5` | number of ranked identities returned |
-| `REID_GALLERY_DIR` | `src/backend/data/gallery` | where the gallery index is read from |
 | `REID_MAX_UPLOAD_MB` | `10` | upload limit |
 | `CORS_ORIGINS` | `http://localhost:5173` | allowed browser origins |
 | `VITE_API_URL` (frontend) | empty | API base URL for a deployed build |
 
-## Layout
+## A small gallery without training
 
-```
-src/backend/
-  app.py            Flask app + routes
-  config.py         settings
-  reid/             preprocessing, model (embedders), gallery, openset
-  scripts/          build_gallery.py
-  tests/            pytest suite
-src/frontend/
-  src/              App.jsx, api.js, components/UploadDropzone.jsx, components/ResultPanel.jsx
-```
-
-## Next steps for the project
-
-1. Download WildlifeReID-10k and keep its official open-set / time-aware / similarity-aware splits.
-2. Fine-tune each backbone with an ArcFace head, then save the backbone weights (staged unfreezing as in the proposal).
-3. Build one gallery per model with `build_gallery.py` and choose each model's threshold on a validation split.
-4. Compute Top-1, Top-5, mAP, BAKS, BAUS and AUROC, then set `REID_MODEL` to the winner.
-
-The repo's `src/models/convnext/` and `src/models/miewid/` folders are for the training code. The embedders used
-for serving live in `src/backend/reid/model.py`; load the fine-tuned backbone weights there via `REID_CHECKPOINT`.
+`python scripts/build_gallery.py --images gallery_images --model dummy` (from `src/backend/`) builds a gallery
+from a folder with one sub-folder of images per identity. It is useful for demos and tests only.

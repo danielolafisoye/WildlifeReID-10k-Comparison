@@ -15,11 +15,22 @@ class Gallery:
     interface stays the same.
     """
 
-    def __init__(self, embeddings: np.ndarray, identities: list[str], image_ids: list[str], model_name: str = ""):
+    def __init__(
+        self,
+        embeddings: np.ndarray,
+        identities: list[str],
+        image_ids: list[str],
+        model_name: str = "",
+        thresholds: dict[str, float] | None = None,
+        default_score: str = "",
+    ):
         self.embeddings = np.asarray(embeddings, dtype=np.float32)
         self.identities = list(identities)
         self.image_ids = list(image_ids)
         self.model_name = model_name
+        # Open-set thresholds chosen on validation data by src/models (evaluate --export-gallery).
+        self.thresholds = dict(thresholds or {})
+        self.default_score = default_score
         if len(self.identities) != len(self.embeddings) or len(self.image_ids) != len(self.embeddings):
             raise ValueError("embeddings, identities and image_ids must have the same length")
 
@@ -41,13 +52,19 @@ class Gallery:
         if not emb_path.exists() or not meta_path.exists():
             return cls.empty()
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        return cls(np.load(emb_path), meta["identities"], meta["image_ids"], meta.get("model", ""))
+        return cls(
+            np.load(emb_path), meta["identities"], meta["image_ids"], meta.get("model", ""),
+            meta.get("thresholds"), meta.get("default_score", ""),
+        )
 
     def save(self, directory: Path) -> None:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         np.save(directory / EMBEDDINGS_FILE, self.embeddings)
-        meta = {"identities": self.identities, "image_ids": self.image_ids, "model": self.model_name}
+        meta = {
+            "identities": self.identities, "image_ids": self.image_ids, "model": self.model_name,
+            "thresholds": self.thresholds, "default_score": self.default_score,
+        }
         (directory / META_FILE).write_text(json.dumps(meta), encoding="utf-8")
 
     def search(self, query: np.ndarray, k: int = 5) -> list[dict]:

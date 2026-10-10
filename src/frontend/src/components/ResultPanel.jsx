@@ -14,6 +14,11 @@ export default function ResultPanel({ result }) {
           <p className="headline">
             {result.prediction.identity} <span className="score">{pct(result.prediction.score)} similarity</span>
           </p>
+          {result.score === "margin" && (
+            <p className="muted">
+              {pct(result.decision_score)} ahead of the second-best individual (at least {pct(result.threshold)} required).
+            </p>
+          )}
         </>
       ) : (
         <>
@@ -23,7 +28,13 @@ export default function ResultPanel({ result }) {
               ? "The gallery is empty, so there is nothing to compare against. Build the gallery first."
               : "No sufficiently reliable known identity was found."}
           </p>
-          {result.prediction.score !== null && (
+          {result.prediction.score !== null && result.score === "margin" && (
+            <p className="muted">
+              The closest match ({pct(result.prediction.score)} similarity) was only {pct(result.decision_score)} ahead
+              of the second-best individual; a lead of at least {pct(result.threshold)} is required.
+            </p>
+          )}
+          {result.prediction.score !== null && result.score !== "margin" && (
             <p className="muted">
               Best similarity was {pct(result.prediction.score)}, below the threshold of {pct(result.threshold)}.
             </p>

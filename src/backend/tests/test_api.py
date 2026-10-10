@@ -74,3 +74,28 @@ def test_missing_file(client):
 
 def test_decide_empty_gallery():
     assert decide([], 0.65)["reason"] == "gallery_empty"
+
+
+def test_decide_margin():
+    close = [{"identity": "a", "score": 0.80}, {"identity": "b", "score": 0.78}]
+    clear = [{"identity": "a", "score": 0.80}, {"identity": "b", "score": 0.40}]
+    assert decide(close, 0.1, "margin")["status"] == "unknown"
+    assert decide(clear, 0.1, "margin")["status"] == "known"
+    assert decide(close, 0.65, "max_sim")["status"] == "known"
+
+
+def test_exported_gallery_sets_score_and_threshold():
+    embedder = DummyEmbedder()
+    vecs = [embedder.embed(Image.open(io.BytesIO(make_image(kind))).convert("RGB")) for kind in ("h", "v")]
+    gallery = Gallery(
+        np.stack(vecs).astype(np.float16), ["animal_h", "animal_v"], ["h.png", "v.png"], "dummy",
+        thresholds={"max_sim": 0.6, "margin": 0.25}, default_score="margin",
+    )
+    client = create_app(Config, embedder=embedder, gallery=gallery).test_client()
+    cfg = client.get("/api/config").get_json()
+    assert cfg["score"] == "margin" and cfg["threshold"] == 0.25
+
+    body = post(client, make_image("h")).get_json()
+    assert body["score"] == "margin" and body["status"] == "known"
+    assert body["decision_score"] == pytest.approx(body["top_k"][0]["score"] - body["top_k"][1]["score"], abs=1e-3)
+    assert post(client, make_image("h"), threshold="5").get_json()["status"] == "unknown"
