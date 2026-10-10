@@ -47,7 +47,7 @@ for epoch in range(num_epochs):
 
     total_loss = 0
 
-    for images, labels in train_loader:
+    for images, labels in progress:
 
         # Move images and labels to GPU
         images = images.to(device)
