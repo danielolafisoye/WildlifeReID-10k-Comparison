@@ -13,8 +13,10 @@ src/models/
   common/retrieval.py   gallery search and the four open-set scores
   common/metrics.py     Top-1/5, mAP, BAKS, BAUS, normalised accuracy, AUROC, TNR@95TPR
   miewid/backbone.py    loads MiewID-msv3 and selects the layers to unfreeze
+  common/cli.py         the train and evaluate commands, shared by both models
   miewid/train.py       fine-tuning entry point
   miewid/evaluate.py    test-split evaluation, optional gallery export for the API
+  convnext/             the same pipeline with a ConvNeXt Base backbone
 ```
 
 ## Protocol

@@ -2,6 +2,7 @@ import warnings
 
 from torch import nn
 
+NAME = "miewid"
 MODEL_ID = "conservationxlabs/miewid-msv3"
 REVISION = "4f1d7f2b521149e5fe34bb85f377248ce9971a7d"
 INPUT_SIZE = 440
