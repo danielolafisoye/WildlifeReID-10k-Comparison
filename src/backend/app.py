@@ -1,85 +1,190 @@
-"""Flask REST API for open-set animal re-identification.
+"""Flask API for open-set wildlife identity prediction."""
 
-    POST /api/predict   multipart form field "image" (optional "threshold") -> ranked matches or unknown
-    GET  /api/health    liveness + model / gallery info
-    GET  /api/config    settings the UI needs (threshold, top-k, accepted types)
-"""
+import io
 import time
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 from config import Config
-from reid.gallery import Gallery
-from reid.model import load_embedder
-from reid.openset import decide
+from reid.classifier import ConvNeXtClassifier, ModelUnavailableError
+from reid.dataset import DatasetUnavailableError, TestImageCatalog
 from reid.preprocessing import InvalidImageError, load_image
 
 
-def create_app(config=Config, embedder=None, gallery=None) -> Flask:
+def create_app(config=Config, predictors=None, catalog=None) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_MB * 1024 * 1024
     CORS(app, origins=config.CORS_ORIGINS)
 
-    # Loaded once at start-up, not per request (gallery embeddings are precomputed).
-    app.extensions["embedder"] = embedder or load_embedder(config.MODEL_NAME, config.DEVICE, config.CHECKPOINT)
-    app.extensions["gallery"] = gallery if gallery is not None else Gallery.load(config.GALLERY_DIR)
+    app.extensions["predictors"] = dict(predictors or {})
+    app.extensions["catalog_error"] = None
+    if catalog is not None:
+        app.extensions["test_catalog"] = catalog
+    else:
+        try:
+            app.extensions["test_catalog"] = TestImageCatalog(
+                config.DATASET_ROOT,
+                config.DATASET_ARCHIVE,
+                config.CONVNEXT_LABEL_MAP,
+                config.UNKNOWN_TEST_IDENTITIES,
+                kaggle_dataset_handle=getattr(config, "KAGGLE_DATASET_HANDLE", None),
+                allow_remote=getattr(config, "KAGGLE_ON_DEMAND", False),
+            )
+        except (DatasetUnavailableError, OSError, ValueError) as exc:
+            app.extensions["test_catalog"] = None
+            app.extensions["catalog_error"] = str(exc)
 
     def error(message: str, status: int):
         return jsonify({"error": message}), status
 
+    def model_options():
+        convnext_available = (
+            "convnext" in app.extensions["predictors"]
+            or (
+                config.CONVNEXT_CHECKPOINT.exists()
+                and config.CONVNEXT_LABEL_MAP.exists()
+                and config.CONVNEXT_CHECKPOINT.stat().st_size > 1024
+            )
+        )
+        return [
+            {
+                "id": "convnext",
+                "name": "ConvNeXt Base",
+                "available": convnext_available,
+                "reason": None if convnext_available else "Checkpoint or label map is unavailable.",
+            },
+            {
+                "id": "miewid",
+                "name": "MiewID",
+                "available": "miewid" in app.extensions["predictors"],
+                "reason": None
+                if "miewid" in app.extensions["predictors"]
+                else "MiewID checkpoint has not been connected yet.",
+            },
+        ]
+
+    def get_predictor(name: str):
+        predictors = app.extensions["predictors"]
+        if name in predictors:
+            return predictors[name]
+        if name != "convnext":
+            raise ModelUnavailableError(f"Model '{name}' is not available yet.")
+        predictor = ConvNeXtClassifier(
+            config.CONVNEXT_CHECKPOINT,
+            config.CONVNEXT_LABEL_MAP,
+            config.DEVICE,
+        )
+        predictors[name] = predictor
+        return predictor
+
     @app.get("/api/health")
     def health():
-        gal = app.extensions["gallery"]
-        return jsonify({
-            "status": "ok",
-            "model": app.extensions["embedder"].name,
-            "gallery_images": len(gal),
-            "gallery_identities": gal.num_identities,
-        })
+        return jsonify(
+            {
+                "status": "ok",
+                "models": model_options(),
+                "dataset_available": app.extensions["test_catalog"] is not None,
+                "dataset_error": app.extensions["catalog_error"],
+            }
+        )
 
     @app.get("/api/config")
     def get_config():
-        return jsonify({
-            "threshold": config.THRESHOLD,
-            "top_k": config.TOP_K,
-            "max_upload_mb": config.MAX_UPLOAD_MB,
-            "allowed_extensions": sorted(config.ALLOWED_EXTENSIONS),
-        })
+        return jsonify(
+            {
+                "default_model": config.DEFAULT_MODEL,
+                "models": model_options(),
+                "threshold": config.THRESHOLD,
+                "top_k": config.TOP_K,
+                "max_upload_mb": config.MAX_UPLOAD_MB,
+                "allowed_extensions": sorted(config.ALLOWED_EXTENSIONS),
+            }
+        )
+
+    @app.get("/api/test-images")
+    def test_images():
+        catalog = app.extensions["test_catalog"]
+        if catalog is None:
+            return error(app.extensions["catalog_error"] or "Test dataset is unavailable.", 503)
+        try:
+            page = max(1, int(request.args.get("page", 1)))
+            page_size = min(48, max(1, int(request.args.get("page_size", 18))))
+        except ValueError:
+            return error("page and page_size must be integers.", 400)
+        query_type = request.args.get("type", "all").lower()
+        if query_type not in {"all", "known", "unknown"}:
+            return error("type must be all, known or unknown.", 400)
+        return jsonify(catalog.list_images(page, page_size, query_type))
+
+    @app.get("/api/test-images/<query_id>/image")
+    def test_image(query_id):
+        catalog = app.extensions["test_catalog"]
+        if catalog is None:
+            return error(app.extensions["catalog_error"] or "Test dataset is unavailable.", 503)
+        try:
+            data, filename, mime_type = catalog.image_bytes(query_id)
+        except KeyError:
+            return error("Test image not found.", 404)
+        except DatasetUnavailableError as exc:
+            return error(str(exc), 404)
+        return send_file(io.BytesIO(data), mimetype=mime_type, download_name=filename)
 
     @app.post("/api/predict")
     def predict():
+        model_name = request.form.get("model", config.DEFAULT_MODEL).lower()
         upload = request.files.get("image")
-        if upload is None or upload.filename == "":
-            return error("No image uploaded. Send a multipart form field named 'image'.", 400)
-        ext = upload.filename.rsplit(".", 1)[-1].lower() if "." in upload.filename else ""
-        if ext not in config.ALLOWED_EXTENSIONS:
-            return error(f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(config.ALLOWED_EXTENSIONS))}.", 415)
+        test_image_id = request.form.get("test_image_id")
+        if bool(upload and upload.filename) == bool(test_image_id):
+            return error("Provide exactly one uploaded image or test_image_id.", 400)
 
+        source = "upload"
         try:
-            threshold = float(request.form.get("threshold", config.THRESHOLD))
-        except ValueError:
-            return error("threshold must be a number.", 400)
-
-        started = time.perf_counter()
-        try:
-            image = load_image(upload.read())  # 1. validate and load
+            if test_image_id:
+                catalog = app.extensions["test_catalog"]
+                if catalog is None:
+                    return error(app.extensions["catalog_error"] or "Test dataset is unavailable.", 503)
+                image_bytes, _, _ = catalog.image_bytes(test_image_id)
+                source = "test"
+            else:
+                extension = upload.filename.rsplit(".", 1)[-1].lower() if "." in upload.filename else ""
+                if extension not in config.ALLOWED_EXTENSIONS:
+                    allowed = ", ".join(sorted(config.ALLOWED_EXTENSIONS))
+                    return error(f"Unsupported file type '.{extension}'. Allowed: {allowed}.", 415)
+                image_bytes = upload.read()
+            image = load_image(image_bytes)
+            predictor = get_predictor(model_name)
         except InvalidImageError as exc:
             return error(str(exc), 400)
+        except KeyError:
+            return error("Test image not found.", 404)
+        except DatasetUnavailableError as exc:
+            return error(str(exc), 404)
+        except ModelUnavailableError as exc:
+            return error(str(exc), 503)
 
-        query = app.extensions["embedder"].embed(image)  # 2-3. preprocess + embedding
-        candidates = app.extensions["gallery"].search(query, config.TOP_K)  # 4-5. similarity search + ranking
-        decision = decide(candidates, threshold)  # 6. open-set threshold
-
-        return jsonify({  # 7. JSON result
-            "status": decision["status"],
-            "prediction": {"identity": decision["identity"], "score": decision["score"]},
-            "reason": decision["reason"],
-            "top_k": candidates,
-            "threshold": threshold,
-            "model": app.extensions["embedder"].name,
-            "inference_ms": round((time.perf_counter() - started) * 1000, 1),
-        })
+        started = time.perf_counter()
+        prediction = predictor.predict(image, config.TOP_K)
+        confidence = prediction["confidence"]
+        return jsonify(
+            {
+                "predicted_identity": prediction["predicted_identity"],
+                "confidence": round(confidence, 6),
+                "is_unknown": confidence < config.THRESHOLD,
+                "top_5": [candidate["identity"] for candidate in prediction["top_k"]],
+                "top_5_details": [
+                    {
+                        "identity": candidate["identity"],
+                        "confidence": round(candidate["confidence"], 6),
+                    }
+                    for candidate in prediction["top_k"]
+                ],
+                "model": model_name,
+                "threshold": config.THRESHOLD,
+                "source": source,
+                "inference_ms": round((time.perf_counter() - started) * 1000, 1),
+            }
+        )
 
     @app.errorhandler(413)
     def too_large(_):

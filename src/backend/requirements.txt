@@ -1,12 +1,9 @@
 flask>=3.0
 flask-cors>=4.0
+kagglehub>=0.4.3
 numpy>=1.26
+pandas>=2.1
 pillow>=10.0
 pytest>=8.0
-
-# Only needed for the real models (REID_MODEL=convnext or miewid):
-# torch
-# torchvision
-# timm
-# transformers
-# faiss-cpu   # optional, for a large gallery
+torch>=2.2
+torchvision>=0.17

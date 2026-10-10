@@ -3,6 +3,7 @@ import io
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
+from torchvision.transforms import CenterCrop, Compose, InterpolationMode, Normalize, Resize, ToTensor
 
 # ImageNet statistics, used by both MiewID and ConvNeXt pretrained weights.
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -33,3 +34,18 @@ def to_chw_array(image: Image.Image, size: int) -> np.ndarray:
     arr = np.asarray(resized, dtype=np.float32) / 255.0
     arr = (arr - IMAGENET_MEAN) / IMAGENET_STD
     return np.transpose(arr, (2, 0, 1))
+
+
+def convnext_transform():
+    """Return the exact preprocessing pipeline used by the ConvNeXt training code."""
+    return Compose(
+        [
+            Resize(232, interpolation=InterpolationMode.BILINEAR),
+            CenterCrop(224),
+            ToTensor(),
+            Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ]
+    )

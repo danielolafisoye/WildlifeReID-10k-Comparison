@@ -2,75 +2,153 @@ import io
 import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import create_app  # noqa: E402
-from config import Config  # noqa: E402
-from reid.gallery import Gallery  # noqa: E402
-from reid.model import DummyEmbedder  # noqa: E402
-from reid.openset import decide  # noqa: E402
 
 
-def make_image(kind: str) -> bytes:
-    """Two visually different synthetic images (horizontal vs vertical gradient)."""
-    ramp = np.linspace(0, 255, 64, dtype=np.uint8)
-    arr = np.tile(ramp, (64, 1)) if kind == "h" else np.tile(ramp[:, None], (1, 64))
-    img = Image.fromarray(np.stack([arr, arr, arr], axis=-1))
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+def image_bytes() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 32), "#9f7a52").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
-@pytest.fixture()
-def client():
-    embedder = DummyEmbedder()
-    vecs, ids = [], []
-    for ident, kind in [("animal_h", "h"), ("animal_v", "v")]:
-        img = Image.open(io.BytesIO(make_image(kind))).convert("RGB")
-        vecs.append(embedder.embed(img))
-        ids.append(ident)
-    gallery = Gallery(np.stack(vecs), ids, [f"{i}.png" for i in ids], model_name="dummy")
-    return create_app(Config, embedder=embedder, gallery=gallery).test_client()
+class TestConfig:
+    DEVICE = "cpu"
+    DEFAULT_MODEL = "convnext"
+    CONVNEXT_CHECKPOINT = Path("missing.pth")
+    CONVNEXT_LABEL_MAP = Path("missing.json")
+    DATASET_ROOT = Path("missing-dataset")
+    DATASET_ARCHIVE = Path("missing.zip")
+    THRESHOLD = 0.50
+    TOP_K = 5
+    UNKNOWN_TEST_IDENTITIES = 20
+    MAX_UPLOAD_MB = 10
+    ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+    CORS_ORIGINS = ["http://localhost:4173"]
 
 
-def post(client, data, name="q.png", **form):
-    return client.post("/api/predict", data={"image": (io.BytesIO(data), name), **form}, content_type="multipart/form-data")
+class FakePredictor:
+    def __init__(self, confidence=0.82):
+        self.confidence = confidence
+
+    def predict(self, image, top_k):
+        ranked = [
+            {"identity": f"animal_{index}", "confidence": max(0.01, self.confidence - index * 0.1)}
+            for index in range(top_k)
+        ]
+        return {
+            "predicted_identity": ranked[0]["identity"],
+            "confidence": ranked[0]["confidence"],
+            "top_k": ranked,
+        }
 
 
-def test_health(client):
-    body = client.get("/api/health").get_json()
-    assert body["status"] == "ok" and body["gallery_identities"] == 2
+class FakeCatalog:
+    def list_images(self, page, page_size, query_type):
+        return {
+            "items": [
+                {
+                    "id": "42",
+                    "query_type": "known",
+                    "image_url": "/api/test-images/42/image",
+                }
+            ],
+            "page": page,
+            "page_size": page_size,
+            "total": 1,
+            "pages": 1,
+        }
+
+    def image_bytes(self, query_id):
+        if query_id != "42":
+            raise KeyError(query_id)
+        return image_bytes(), "animal.png", "image/png"
 
 
-def test_known_individual(client):
-    body = post(client, make_image("h")).get_json()
-    assert body["status"] == "known"
-    assert body["prediction"]["identity"] == "animal_h"
-    assert body["top_k"][0]["identity"] == "animal_h"
+def client(confidence=0.82):
+    app = create_app(
+        TestConfig,
+        predictors={"convnext": FakePredictor(confidence)},
+        catalog=FakeCatalog(),
+    )
+    return app.test_client()
 
 
-def test_unknown_when_threshold_not_met(client):
-    body = post(client, make_image("h"), threshold="1.1").get_json()
-    assert body["status"] == "unknown" and body["reason"] == "below_threshold"
+def test_health_and_model_availability():
+    body = client().get("/api/health").get_json()
+    assert body["status"] == "ok"
+    assert body["dataset_available"] is True
+    assert body["models"][0]["available"] is True
+    assert body["models"][1]["available"] is False
 
 
-def test_rejects_non_image(client):
-    res = post(client, b"not an image", name="q.png")
-    assert res.status_code == 400
+def test_upload_prediction_returns_frontend_contract():
+    response = client().post(
+        "/api/predict",
+        data={
+            "model": "convnext",
+            "image": (io.BytesIO(image_bytes()), "query.png"),
+        },
+        content_type="multipart/form-data",
+    )
+    body = response.get_json()
+    assert response.status_code == 200
+    assert body["predicted_identity"] == "animal_0"
+    assert body["confidence"] == pytest.approx(0.82)
+    assert body["is_unknown"] is False
+    assert body["top_5"] == [f"animal_{index}" for index in range(5)]
 
 
-def test_rejects_wrong_extension(client):
-    res = post(client, make_image("h"), name="q.gif")
-    assert res.status_code == 415
+def test_low_confidence_is_unknown_but_keeps_best_guess():
+    response = client(0.40).post(
+        "/api/predict",
+        data={
+            "model": "convnext",
+            "image": (io.BytesIO(image_bytes()), "query.png"),
+        },
+        content_type="multipart/form-data",
+    )
+    body = response.get_json()
+    assert body["is_unknown"] is True
+    assert body["predicted_identity"] == "animal_0"
 
 
-def test_missing_file(client):
-    assert client.post("/api/predict").status_code == 400
+def test_predicts_selected_test_image():
+    response = client().post(
+        "/api/predict",
+        data={"model": "convnext", "test_image_id": "42"},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["source"] == "test"
 
 
-def test_decide_empty_gallery():
-    assert decide([], 0.65)["reason"] == "gallery_empty"
+def test_lists_and_serves_test_images():
+    api = client()
+    listing = api.get("/api/test-images").get_json()
+    assert listing["items"][0]["id"] == "42"
+    assert api.get("/api/test-images/42/image").mimetype == "image/png"
+
+
+def test_rejects_invalid_inputs():
+    api = client()
+    assert api.post("/api/predict").status_code == 400
+    assert (
+        api.post(
+            "/api/predict",
+            data={"image": (io.BytesIO(b"not an image"), "query.png")},
+            content_type="multipart/form-data",
+        ).status_code
+        == 400
+    )
+    assert (
+        api.post(
+            "/api/predict",
+            data={"image": (io.BytesIO(image_bytes()), "query.gif")},
+            content_type="multipart/form-data",
+        ).status_code
+        == 415
+    )
