@@ -1,0 +1,56 @@
+import torch
+import torch.nn as nn
+from torchvision.models import convnext_base, ConvNeXt_Base_Weights
+
+from prepare_data import train_loader, label_map
+
+num_epochs = 100
+
+# Number of animal identities
+num_classes = len(label_map)
+
+
+# Load pretrained ConvNeXt
+model = convnext_base(
+    weights=ConvNeXt_Base_Weights.DEFAULT
+)
+
+
+# Replace ImageNet classifier
+model.classifier[2] = nn.Linear(
+    model.classifier[2].in_features,
+    num_classes
+)
+
+# Loss
+loss_function = nn.CrossEntropyLoss()
+
+
+# Optimizer
+optimizer = torch.optim.Adam(
+    model.parameters(),
+    lr=0.0001
+)
+
+
+for epoch in range(num_epochs):
+
+    total_loss = 0
+
+    for images, labels in train_loader:
+
+        predictions = model(images)
+
+        loss = loss_function(predictions, labels)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    average_loss = total_loss / len(train_loader)
+
+    print(f"Epoch {epoch + 1}/{num_epochs} Loss: {average_loss:.4f}")
+
+torch.save(model.state_dict(), "convnext_weights.pth")
