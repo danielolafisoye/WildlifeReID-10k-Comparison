@@ -27,7 +27,16 @@ def load_miewid(pretrained=True):
             "training from scratch is intentionally unsupported."
         )
 
+    import transformers
     from transformers import AutoConfig, AutoModel
+
+    major_version = int(transformers.__version__.split(".", 1)[0])
+    if major_version >= 5:
+        raise RuntimeError(
+            "Official MiewID-msv3 is not compatible with Transformers 5. "
+            "Install the supported release with: "
+            "pip install --force-reinstall 'transformers>=4.45,<5.0'"
+        )
 
     try:
         model = AutoModel.from_pretrained(MODEL_TAG, trust_remote_code=True)
@@ -48,6 +57,12 @@ def load_miewid(pretrained=True):
         if not hasattr(model_class, "all_tied_weights_keys"):
             model_class.all_tied_weights_keys = property(lambda self: {})
         model = AutoModel.from_pretrained(MODEL_TAG, trust_remote_code=True)
+    meta_parameters = [name for name, parameter in model.named_parameters() if parameter.is_meta]
+    if meta_parameters:
+        raise RuntimeError(
+            "MiewID pretrained weights were not materialized correctly. "
+            "Reinstall Transformers below version 5 before training."
+        )
     if not hasattr(model, "final_in_features"):
         model.final_in_features = EMBEDDING_DIM
     return model

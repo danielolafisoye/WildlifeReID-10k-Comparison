@@ -8,6 +8,7 @@ import pandas as pd
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+from tqdm.auto import tqdm
 
 from model import IMAGE_SIZE, MEAN, STD, inference_transform
 
@@ -28,11 +29,15 @@ NUM_KNOWN_IDENTITIES = 100
 NUM_UNKNOWN_IDENTITIES = 20
 RANDOM_STATE = 42
 BATCH_SIZE = int(os.getenv("MIEWID_BATCH_SIZE", "8"))
-NUM_WORKERS = int(os.getenv("MIEWID_NUM_WORKERS", "2"))
+NUM_WORKERS = int(os.getenv("MIEWID_NUM_WORKERS", "0"))
 
 
 def download_dataset_file(relative_path):
     """Download one WildlifeReID-10k file without fetching the full dataset."""
+    # Colab's dataset-mount resolver can return intermittent 403 responses for
+    # individual files. The normal Kaggle HTTP resolver supports public files,
+    # writes them to ~/.cache/kagglehub, and is stable for sequential prefetch.
+    os.environ["DISABLE_COLAB_CACHE"] = "1"
     try:
         import kagglehub
     except ImportError as exc:
@@ -67,6 +72,13 @@ def resolve_image_path(relative_path):
     if local_path.is_file():
         return local_path
     return download_dataset_file(relative_path)
+
+
+def prefetch_images(dataframe, description):
+    """Cache selected files sequentially before DataLoader iteration."""
+    paths = dataframe["path"].drop_duplicates().tolist()
+    for relative_path in tqdm(paths, desc=description):
+        resolve_image_path(relative_path)
 
 
 df = pd.read_csv(resolve_metadata_path(), low_memory=False)
