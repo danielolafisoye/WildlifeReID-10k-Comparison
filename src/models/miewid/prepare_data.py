@@ -13,6 +13,7 @@ from model import IMAGE_SIZE, MEAN, STD, inference_transform
 
 
 MODEL_DIR = Path(__file__).resolve().parent
+KAGGLE_DATASET_HANDLE = "wildlifedatasets/wildlifereid-10k/versions/10"
 DATA_ROOT = Path(
     os.getenv(
         "WILDLIFE_DATASET_ROOT",
@@ -30,7 +31,45 @@ BATCH_SIZE = int(os.getenv("MIEWID_BATCH_SIZE", "8"))
 NUM_WORKERS = int(os.getenv("MIEWID_NUM_WORKERS", "2"))
 
 
-df = pd.read_csv(METADATA_PATH, low_memory=False)
+def download_dataset_file(relative_path):
+    """Download one WildlifeReID-10k file without fetching the full dataset."""
+    try:
+        import kagglehub
+    except ImportError as exc:
+        raise RuntimeError(
+            "kagglehub is required to download missing WildlifeReID files. "
+            "Run: pip install -r requirements.txt"
+        ) from exc
+
+    try:
+        return Path(
+            kagglehub.dataset_download(
+                KAGGLE_DATASET_HANDLE,
+                path=str(relative_path),
+            )
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not download '{relative_path}' from Kaggle. "
+            "Check the Colab internet connection and Kaggle access."
+        ) from exc
+
+
+def resolve_metadata_path():
+    if METADATA_PATH.is_file():
+        return METADATA_PATH
+    print("metadata.csv is missing; downloading only that file from Kaggle...", flush=True)
+    return download_dataset_file("metadata.csv")
+
+
+def resolve_image_path(relative_path):
+    local_path = DATA_ROOT / relative_path
+    if local_path.is_file():
+        return local_path
+    return download_dataset_file(relative_path)
+
+
+df = pd.read_csv(resolve_metadata_path(), low_memory=False)
 all_train_df = df[df["split"] == "train"]
 all_test_df = df[df["split"] == "test"]
 
@@ -80,7 +119,15 @@ train_transform = transforms.Compose(
     [
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.RandomApply(
-            [transforms.RandomChoice([transforms.RandomAdjustSharpness(1.5), transforms.Grayscale(num_output_channels=3), transforms.RandomAutocontrast()])],
+            [
+                transforms.RandomChoice(
+                    [
+                        transforms.RandomAdjustSharpness(1.5),
+                        transforms.Grayscale(num_output_channels=3),
+                        transforms.RandomAutocontrast(),
+                    ]
+                )
+            ],
             p=0.5,
         ),
         transforms.RandomAffine(
@@ -105,7 +152,9 @@ class WildlifeDataset(Dataset):
 
     def __getitem__(self, index):
         row = self.df.iloc[index]
-        image = Image.open(DATA_ROOT / row["path"]).convert("RGB")
+        image_path = resolve_image_path(row["path"])
+        with Image.open(image_path) as opened:
+            image = opened.convert("RGB")
         image = self.transform(image)
         label = label_map.get(row["identity"], -1)
         return image, label
