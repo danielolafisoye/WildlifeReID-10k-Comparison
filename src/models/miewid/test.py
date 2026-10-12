@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 
 from inference import DEFAULT_GALLERY, DEFAULT_WEIGHTS, identity_matches, load_finetuned_model
 from model import extract_embeddings
-from prepare_data import identities, test_loader
+from prepare_data import identities, prefetch_images, test_df, test_loader
 
 
 def average_precision(similarities, true_identity, gallery_identities):
@@ -35,6 +35,7 @@ def main():
     args = parser.parse_args()
 
     model, device = load_finetuned_model(args.weights, args.device)
+    prefetch_images(test_df, "Caching selected MiewID test images")
     gallery = torch.load(args.gallery, map_location="cpu", weights_only=True)
     gallery_embeddings = F.normalize(gallery["embeddings"].float(), dim=1)
     gallery_identities = gallery["identities"]

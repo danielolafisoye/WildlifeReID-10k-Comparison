@@ -22,6 +22,7 @@ from prepare_data import (
     gallery_loader,
     identities,
     label_map,
+    prefetch_images,
     train_df,
     train_loader,
 )
@@ -133,6 +134,8 @@ def main():
     device = choose_device(args.device)
     print("Training on:", device, flush=True)
     print(f"Known identities: {len(label_map)}", flush=True)
+
+    prefetch_images(train_df, "Caching selected MiewID training images")
 
     model = load_miewid(pretrained=True).to(device)
     embedding_dim = int(getattr(model, "final_in_features", EMBEDDING_DIM))
