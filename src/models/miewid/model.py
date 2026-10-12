@@ -27,9 +27,27 @@ def load_miewid(pretrained=True):
             "training from scratch is intentionally unsupported."
         )
 
-    from transformers import AutoModel
+    from transformers import AutoConfig, AutoModel
 
-    model = AutoModel.from_pretrained(MODEL_TAG, trust_remote_code=True)
+    try:
+        model = AutoModel.from_pretrained(MODEL_TAG, trust_remote_code=True)
+    except AttributeError as exc:
+        if "all_tied_weights_keys" not in str(exc):
+            raise
+
+        # MiewID's custom class predates the Transformers 5 rename from
+        # _tied_weights_keys to all_tied_weights_keys. Patch the downloaded
+        # class and retry without changing the official checkpoint.
+        from transformers.dynamic_module_utils import get_class_from_dynamic_module
+
+        config = AutoConfig.from_pretrained(MODEL_TAG, trust_remote_code=True)
+        model_class = get_class_from_dynamic_module(
+            config.auto_map["AutoModel"],
+            MODEL_TAG,
+        )
+        if not hasattr(model_class, "all_tied_weights_keys"):
+            model_class.all_tied_weights_keys = property(lambda self: {})
+        model = AutoModel.from_pretrained(MODEL_TAG, trust_remote_code=True)
     if not hasattr(model, "final_in_features"):
         model.final_in_features = EMBEDDING_DIM
     return model
