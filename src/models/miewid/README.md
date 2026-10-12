@@ -22,6 +22,9 @@ python test.py
 python inference.py path/to/query.jpg --threshold 0.50
 ```
 
+If `metadata.csv` or a selected image is missing, `prepare_data.py` downloads
+only that file from the public Kaggle dataset and reuses KaggleHub's cache.
+
 Training saves `miewid_weights.pth`, `label_map.json`, and
 `known_gallery.pth` in this directory. The gallery contains normalized
 embeddings from known-identity training images; test images are only queries.
