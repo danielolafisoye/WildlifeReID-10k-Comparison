@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from PIL import Image
 from tqdm.auto import tqdm
 
-from model import MODEL_TAG, extract_embeddings, inference_transform, load_miewid
+from model import MODEL_TAG, extract_embeddings, inference_transform, load_miewid_runtime
 
 
 MODEL_DIR = Path(__file__).resolve().parent
@@ -30,10 +30,12 @@ def choose_device(requested="auto"):
 
 def load_finetuned_model(weights_path=DEFAULT_WEIGHTS, device="auto"):
     device = choose_device(device)
-    model = load_miewid(pretrained=True)
     checkpoint = torch.load(weights_path, map_location="cpu", weights_only=True)
+    if checkpoint.get("model_tag", MODEL_TAG) != MODEL_TAG:
+        raise ValueError(f"Checkpoint is not compatible with {MODEL_TAG}.")
     state_dict = checkpoint.get("model_state_dict", checkpoint)
-    model.load_state_dict(state_dict)
+    model = load_miewid_runtime()
+    model.load_state_dict(state_dict, strict=True)
     model = model.to(device)
     model.eval()
     return model, device

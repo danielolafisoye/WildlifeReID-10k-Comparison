@@ -21,6 +21,9 @@ class TestConfig:
     DEFAULT_MODEL = "convnext"
     CONVNEXT_CHECKPOINT = Path("missing.pth")
     CONVNEXT_LABEL_MAP = Path("missing.json")
+    MIEWID_DIR = Path("missing-miewid")
+    MIEWID_CHECKPOINT = Path("missing-miewid/miewid_weights.pth")
+    MIEWID_GALLERY = Path("missing-miewid/known_gallery.pth")
     DATASET_ROOT = Path("missing-dataset")
     DATASET_ARCHIVE = Path("missing.zip")
     THRESHOLD = 0.50
@@ -69,10 +72,13 @@ class FakeCatalog:
         return image_bytes(), "animal.png", "image/png"
 
 
-def client(confidence=0.82):
+def client(confidence=0.82, include_miewid=False):
+    predictors = {"convnext": FakePredictor(confidence)}
+    if include_miewid:
+        predictors["miewid"] = FakePredictor(confidence)
     app = create_app(
         TestConfig,
-        predictors={"convnext": FakePredictor(confidence)},
+        predictors=predictors,
         catalog=FakeCatalog(),
     )
     return app.test_client()
@@ -101,6 +107,26 @@ def test_upload_prediction_returns_frontend_contract():
     assert body["confidence"] == pytest.approx(0.82)
     assert body["is_unknown"] is False
     assert body["top_5"] == [f"animal_{index}" for index in range(5)]
+
+
+def test_miewid_uses_the_same_frontend_contract():
+    api = client(include_miewid=True)
+    health = api.get("/api/health").get_json()
+    assert health["models"][1]["available"] is True
+
+    response = api.post(
+        "/api/predict",
+        data={
+            "model": "miewid",
+            "image": (io.BytesIO(image_bytes()), "query.png"),
+        },
+        content_type="multipart/form-data",
+    )
+    body = response.get_json()
+    assert response.status_code == 200
+    assert body["model"] == "miewid"
+    assert body["predicted_identity"] == "animal_0"
+    assert body["top_5"][0] == "animal_0"
 
 
 def test_low_confidence_is_unknown_but_keeps_best_guess():

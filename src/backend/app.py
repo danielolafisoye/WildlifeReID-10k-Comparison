@@ -7,7 +7,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 from config import Config
-from reid.classifier import ConvNeXtClassifier, ModelUnavailableError
+from reid.classifier import ConvNeXtClassifier, MiewIDClassifier, ModelUnavailableError
 from reid.dataset import DatasetUnavailableError, TestImageCatalog
 from reid.preprocessing import InvalidImageError, load_image
 
@@ -47,6 +47,16 @@ def create_app(config=Config, predictors=None, catalog=None) -> Flask:
                 and config.CONVNEXT_CHECKPOINT.stat().st_size > 1024
             )
         )
+        miewid_available = (
+            "miewid" in app.extensions["predictors"]
+            or (
+                config.MIEWID_CHECKPOINT.exists()
+                and config.MIEWID_GALLERY.exists()
+                and (config.MIEWID_DIR / "inference.py").exists()
+                and config.MIEWID_CHECKPOINT.stat().st_size > 1024
+                and config.MIEWID_GALLERY.stat().st_size > 1024
+            )
+        )
         return [
             {
                 "id": "convnext",
@@ -57,10 +67,8 @@ def create_app(config=Config, predictors=None, catalog=None) -> Flask:
             {
                 "id": "miewid",
                 "name": "MiewID",
-                "available": "miewid" in app.extensions["predictors"],
-                "reason": None
-                if "miewid" in app.extensions["predictors"]
-                else "MiewID checkpoint has not been connected yet.",
+                "available": miewid_available,
+                "reason": None if miewid_available else "Checkpoint or embedding gallery is unavailable.",
             },
         ]
 
@@ -68,13 +76,22 @@ def create_app(config=Config, predictors=None, catalog=None) -> Flask:
         predictors = app.extensions["predictors"]
         if name in predictors:
             return predictors[name]
-        if name != "convnext":
-            raise ModelUnavailableError(f"Model '{name}' is not available yet.")
-        predictor = ConvNeXtClassifier(
-            config.CONVNEXT_CHECKPOINT,
-            config.CONVNEXT_LABEL_MAP,
-            config.DEVICE,
-        )
+        if name == "convnext":
+            predictor = ConvNeXtClassifier(
+                config.CONVNEXT_CHECKPOINT,
+                config.CONVNEXT_LABEL_MAP,
+                config.DEVICE,
+            )
+        elif name == "miewid":
+            predictor = MiewIDClassifier(
+                config.MIEWID_CHECKPOINT,
+                config.MIEWID_GALLERY,
+                config.MIEWID_DIR,
+                config.THRESHOLD,
+                config.DEVICE,
+            )
+        else:
+            raise ModelUnavailableError(f"Model '{name}' is not available.")
         predictors[name] = predictor
         return predictor
 

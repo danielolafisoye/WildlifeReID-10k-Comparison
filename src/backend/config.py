@@ -25,6 +25,25 @@ class Config:
         )
     )
 
+    MIEWID_DIR = Path(
+        os.getenv(
+            "MIEWID_DIR",
+            REPO_ROOT / "src" / "models" / "miewid",
+        )
+    )
+    MIEWID_CHECKPOINT = Path(
+        os.getenv(
+            "MIEWID_CHECKPOINT",
+            MIEWID_DIR / "miewid_weights.pth",
+        )
+    )
+    MIEWID_GALLERY = Path(
+        os.getenv(
+            "MIEWID_GALLERY",
+            MIEWID_DIR / "known_gallery.pth",
+        )
+    )
+
     DATASET_ROOT = Path(
         os.getenv("WILDLIFE_DATASET_ROOT", REPO_ROOT / "data" / "wildlifereid-10k")
     )

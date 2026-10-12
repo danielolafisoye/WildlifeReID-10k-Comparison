@@ -1,6 +1,8 @@
 """Classifier adapters used by the Flask API."""
 
+import importlib
 import json
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -87,6 +89,80 @@ class ConvNeXtClassifier:
         ]
         return {
             "predicted_identity": ranked[0]["identity"],
+            "confidence": ranked[0]["confidence"],
+            "top_k": ranked,
+        }
+
+
+class MiewIDClassifier:
+    """Adapt MiewID embedding retrieval to the API's ranked-result contract."""
+
+    name = "miewid"
+    display_name = "MiewID"
+
+    def __init__(
+        self,
+        checkpoint: Path,
+        gallery_path: Path,
+        inference_dir: Path,
+        unknown_threshold: float = 0.50,
+        device: str = "auto",
+    ):
+        checkpoint = Path(checkpoint)
+        gallery_path = Path(gallery_path)
+        inference_dir = Path(inference_dir)
+
+        for path, description in (
+            (checkpoint, "checkpoint"),
+            (gallery_path, "embedding gallery"),
+            (inference_dir / "inference.py", "inference module"),
+        ):
+            if not path.exists():
+                raise ModelUnavailableError(f"MiewID {description} not found: {path}")
+
+        # MiewID remains self-contained in src/models/miewid. Import its
+        # standalone inference module lazily so Flask can start without loading
+        # the large model and gallery into memory.
+        inference_dir_text = str(inference_dir.resolve())
+        sys.path.insert(0, inference_dir_text)
+        try:
+            inference_module = importlib.import_module("inference")
+            inference_class = inference_module.MiewIDInference
+            self.inference = inference_class(
+                weights_path=checkpoint,
+                gallery_path=gallery_path,
+                unknown_threshold=unknown_threshold,
+                device=device,
+            )
+        except Exception as exc:
+            raise ModelUnavailableError(
+                "MiewID could not be loaded. Confirm the Git LFS files are present, "
+                "then install src/backend/requirements.txt."
+            ) from exc
+        finally:
+            if sys.path[0] == inference_dir_text:
+                sys.path.pop(0)
+
+    @staticmethod
+    def _display_score(similarity: float) -> float:
+        # Cosine similarity is normally positive for the strongest gallery
+        # match. Clamp rare negative values so the shared percentage UI remains
+        # within its expected 0..1 range.
+        return min(1.0, max(0.0, float(similarity)))
+
+    def predict(self, image: Image.Image, top_k: int = 5) -> dict:
+        result = self.inference.predict(image, top_k=top_k)
+        ranked = [
+            {
+                "identity": match["identity"],
+                "confidence": self._display_score(match["similarity"]),
+            }
+            for match in result["matches"]
+        ]
+        return {
+            # Keep the best identity even below threshold so the frontend can
+            # show it as a best guess while marking the query as unknown.
+            "predicted_identity": result["best_match_identity"],
             "confidence": ranked[0]["confidence"],
             "top_k": ranked,
         }

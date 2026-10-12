@@ -95,6 +95,55 @@ def inference_transform():
     )
 
 
+class GeM(nn.Module):
+    """Generalized-mean pooling used by the official MiewID model."""
+
+    def __init__(self, p=3.0, eps=1e-6):
+        super().__init__()
+        self.p = nn.Parameter(torch.ones(1) * p)
+        self.eps = eps
+
+    def forward(self, features):
+        return F.avg_pool2d(
+            features.clamp(min=self.eps).pow(self.p),
+            (features.size(-2), features.size(-1)),
+        ).pow(1.0 / self.p)
+
+
+class MiewIDRuntime(nn.Module):
+    """Offline inference form of the official miewid-msv3 architecture.
+
+    The pushed fine-tuned checkpoint contains every parameter, so inference
+    should not redownload the original Hugging Face checkpoint. This mirrors
+    the official MiewIdNet structure used during training.
+    """
+
+    def __init__(self):
+        super().__init__()
+        import timm
+
+        self.backbone = timm.create_model(
+            "efficientnetv2_rw_m",
+            pretrained=False,
+            num_classes=0,
+        )
+        self.backbone.global_pool = GeM()
+        self.bn = nn.BatchNorm1d(EMBEDDING_DIM)
+        # Retain the official unused softmax head so the full trained state
+        # dictionary loads strictly and can be integrity-checked.
+        self.final = nn.Linear(EMBEDDING_DIM, 10)
+        self.final_in_features = EMBEDDING_DIM
+
+    def forward(self, images):
+        features = self.backbone(images).view(images.shape[0], -1)
+        return self.bn(features)
+
+
+def load_miewid_runtime():
+    """Build MiewID for a complete fine-tuned checkpoint without downloads."""
+    return MiewIDRuntime()
+
+
 class ArcMarginProductSubcenter(nn.Module):
     """Sub-center cosine classifier used by the official MiewID trainer."""
 
