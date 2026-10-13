@@ -13,6 +13,11 @@ node_modules/
 src/frontend/build/
 src/frontend/.vite/
 
+# Local generated previews and working files
+.chart-data-*/
+.codex-build/
+tmp/
+
 # Environment and local configuration
 .env
 .env.*

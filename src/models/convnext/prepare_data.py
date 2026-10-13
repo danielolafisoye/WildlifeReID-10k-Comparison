@@ -13,7 +13,7 @@ test_df = df[df["split"] == "test"]
 
 # Pick 100 known animals from training
 known_identities = train_df["identity"].drop_duplicates().sample(
-    5000,
+    100,
     random_state=42
 )
 

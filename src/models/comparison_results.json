@@ -1,0 +1,34 @@
+{
+  "protocol": {
+    "dataset": "WildlifeReID-10k version 10",
+    "known_identities": 100,
+    "same_ordered_identities": true,
+    "same_test_queries": true,
+    "query_count": 606,
+    "limited_smoke_test": false,
+    "top_k": 5,
+    "open_set_metric": "threshold-independent AUROC"
+  },
+  "models": {
+    "convnext": {
+      "method": "classification_softmax",
+      "unknown_score": "1 - maximum softmax probability",
+      "top_1": 0.8277310924369747,
+      "top_5": 0.9789915966386554,
+      "open_set_auroc": 0.9080539824625502,
+      "known_queries": 238,
+      "unknown_queries": 368,
+      "mean_inference_ms": 34.145008653464814
+    },
+    "miewid": {
+      "method": "embedding_cosine_retrieval",
+      "unknown_score": "1 - maximum cosine similarity",
+      "top_1": 0.8823529411764706,
+      "top_5": 0.957983193277311,
+      "open_set_auroc": 0.9586454146876142,
+      "known_queries": 238,
+      "unknown_queries": 368,
+      "mean_inference_ms": 91.24342970293696
+    }
+  }
+}

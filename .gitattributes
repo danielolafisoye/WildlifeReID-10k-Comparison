@@ -1,3 +1,6 @@
 *.pth filter=lfs diff=lfs merge=lfs -text
 src/models/convnext/convnext_weights.pth filter=lfs diff=lfs merge=lfs -text
 src/models/miewid/*.pth filter=lfs diff=lfs merge=lfs -text
+*.pdf binary
+*.png binary
+*.pptx binary

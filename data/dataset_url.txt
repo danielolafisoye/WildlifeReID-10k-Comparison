@@ -1,1 +1,11 @@
-# Add the full dataset URL and any access instructions here.
+WildlifeReID-10k dataset:
+https://www.kaggle.com/datasets/wildlifedatasets/wildlifereid-10k
+
+The full dataset is intentionally excluded from Git. The application can use:
+
+1. A local extracted copy at data/wildlifereid-10k, or the path in
+   WILDLIFE_DATASET_ROOT.
+2. A local archive at data/archive.zip, or the path in
+   WILDLIFE_DATASET_ARCHIVE.
+3. Kaggle on-demand mode (enabled by default), which downloads metadata and
+   only the test images requested by the application.
