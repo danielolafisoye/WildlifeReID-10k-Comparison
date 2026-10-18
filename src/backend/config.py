@@ -65,6 +65,9 @@ class Config:
     TOP_K = int(os.getenv("REID_TOP_K", "5"))
     UNKNOWN_TEST_IDENTITIES = int(os.getenv("REID_UNKNOWN_TEST_IDENTITIES", "20"))
 
+    # Optional: folder with the built frontend (index.html), served at "/".
+    FRONTEND_DIST = os.getenv("FRONTEND_DIST")
+
     MAX_UPLOAD_MB = int(os.getenv("REID_MAX_UPLOAD_MB", "10"))
     ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
     CORS_ORIGINS = [

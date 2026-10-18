@@ -46,7 +46,52 @@ ss/               Final presentation
 docs/             Report, figures and reproducibility scripts
 ```
 
-## Setup
+## Quick start with Docker
+
+The easiest way to run the app. You need
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) and
+[Git LFS](https://git-lfs.com/).
+
+```bash
+git clone <repository-url>
+cd WildlifeReID-10k-Comparison
+git lfs install
+git lfs pull
+docker compose up --build
+```
+
+Open <http://localhost:4173>. The first build takes several minutes
+(PyTorch is large); later starts are quick with `docker compose up`.
+Stop with `Ctrl+C`, or `docker compose down` if it runs in the background
+(`docker compose up -d`).
+
+Everything runs in one container: Flask serves both the API and the built
+React app, on CPU, with both models included. Test images are downloaded
+from Kaggle on demand and kept in the `kaggle-cache` volume.
+
+Optional settings go in a `.env` file next to `docker-compose.yml`:
+
+```bash
+APP_PORT=8080            # use another port if 4173 is taken
+REID_DEFAULT_MODEL=miewid
+KAGGLE_USERNAME=...      # only if Kaggle asks for authentication
+KAGGLE_KEY=...
+```
+
+If you already have the dataset, put it in `data/wildlifereid-10k/` (or
+`data/archive.zip`) and it is used instead of Kaggle.
+
+Troubleshooting:
+
+- **Build fails with "Git LFS pointers"**: run `git lfs install` and
+  `git lfs pull`, then build again.
+- **"Test dataset is unavailable"**: the container could not reach Kaggle.
+  Uploading your own image still works.
+- **First prediction is slow**: the model loads on first use.
+- **Out of memory**: give Docker Desktop at least 4 GB of RAM
+  (Settings > Resources).
+
+## Manual setup
 
 The model checkpoints use Git LFS:
 

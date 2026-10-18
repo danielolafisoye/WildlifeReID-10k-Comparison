@@ -1,16 +1,22 @@
 """Flask API for open-set wildlife identity prediction."""
 
 import io
+import mimetypes
 import time
+from pathlib import Path
 from urllib.parse import quote
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 
 from config import Config
 from reid.classifier import ConvNeXtClassifier, MiewIDClassifier, ModelUnavailableError
 from reid.dataset import DatasetUnavailableError, TestImageCatalog
 from reid.preprocessing import InvalidImageError, load_image
+
+# Some systems (notably Windows) map .js to text/plain, which browsers refuse
+# to run as a module script.
+mimetypes.add_type("text/javascript", ".js")
 
 
 def create_app(config=Config, predictors=None, catalog=None) -> Flask:
@@ -227,6 +233,19 @@ def create_app(config=Config, predictors=None, catalog=None) -> Flask:
     @app.errorhandler(413)
     def too_large(_):
         return error(f"Image is larger than {config.MAX_UPLOAD_MB} MB.", 413)
+
+    # In Docker the built React app is served from the same port as the API.
+    frontend_dist = getattr(config, "FRONTEND_DIST", None)
+    if frontend_dist and (Path(frontend_dist) / "index.html").is_file():
+
+        @app.get("/")
+        @app.get("/<path:path>")
+        def frontend(path="index.html"):
+            if path.startswith("api/"):
+                return error("Not found.", 404)
+            if not (Path(frontend_dist) / path).is_file():
+                path = "index.html"
+            return send_from_directory(frontend_dist, path)
 
     return app
 
