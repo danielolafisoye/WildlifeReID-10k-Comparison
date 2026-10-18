@@ -50,3 +50,7 @@ def test_kaggle_mode_downloads_only_metadata_and_requested_image(tmp_path):
     data, _, _ = catalog.image_bytes(selected_id)
     assert data == b"image-bytes"
     assert requested[-1][1] in {"test/known.jpg", "test/unknown.jpg"}
+
+    reference_data, _, _ = catalog.identity_image_bytes("known_1")
+    assert reference_data == b"image-bytes"
+    assert requested[-1][1] == "train/known.jpg"

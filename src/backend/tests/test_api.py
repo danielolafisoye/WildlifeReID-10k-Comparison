@@ -71,6 +71,11 @@ class FakeCatalog:
             raise KeyError(query_id)
         return image_bytes(), "animal.png", "image/png"
 
+    def identity_image_bytes(self, identity):
+        if not identity.startswith("animal_"):
+            raise KeyError(identity)
+        return image_bytes(), "reference.png", "image/png"
+
 
 def client(confidence=0.82, include_miewid=False):
     predictors = {"convnext": FakePredictor(confidence)}
@@ -107,6 +112,7 @@ def test_upload_prediction_returns_frontend_contract():
     assert body["confidence"] == pytest.approx(0.82)
     assert body["is_unknown"] is False
     assert body["top_5"] == [f"animal_{index}" for index in range(5)]
+    assert body["top_5_details"][0]["image_url"].endswith("identity=animal_0")
 
 
 def test_miewid_uses_the_same_frontend_contract():
@@ -157,6 +163,7 @@ def test_lists_and_serves_test_images():
     listing = api.get("/api/test-images").get_json()
     assert listing["items"][0]["id"] == "42"
     assert api.get("/api/test-images/42/image").mimetype == "image/png"
+    assert api.get("/api/identity-image?identity=animal_0").mimetype == "image/png"
 
 
 def test_rejects_invalid_inputs():
