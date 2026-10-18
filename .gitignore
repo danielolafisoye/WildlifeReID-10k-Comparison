@@ -37,3 +37,5 @@ data/*
 !data/samples/
 !data/samples/**
 !data/dataset_url.txt
+
+docs/*
