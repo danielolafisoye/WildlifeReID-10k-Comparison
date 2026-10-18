@@ -38,6 +38,12 @@ class TestImageCatalog:
         test = metadata[metadata["split"].eq("test")]
         known = test[test["identity"].isin(labels)].copy()
 
+        reference_rows = train[train["identity"].isin(labels)].drop_duplicates("identity")
+        self.identity_rows = {
+            str(row["identity"]): row
+            for _, row in reference_rows.iterrows()
+        }
+
         unknown_pool = test[~test["identity"].isin(train["identity"])]
         unknown_identities = unknown_pool["identity"].drop_duplicates()
         sample_size = min(unknown_identity_count, len(unknown_identities))
@@ -128,6 +134,16 @@ class TestImageCatalog:
         row = self.rows.get(str(query_id))
         if row is None:
             raise KeyError(query_id)
+        return self._row_image_bytes(row)
+
+    def identity_image_bytes(self, identity: str) -> tuple[bytes, str, str]:
+        """Return one deterministic training reference image for a known identity."""
+        row = self.identity_rows.get(str(identity))
+        if row is None:
+            raise KeyError(identity)
+        return self._row_image_bytes(row)
+
+    def _row_image_bytes(self, row) -> tuple[bytes, str, str]:
         relative = str(PurePosixPath(str(row["path"])))
         filename = PurePosixPath(relative).name
         mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"

@@ -2,6 +2,7 @@
 
 import io
 import time
+from urllib.parse import quote
 
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
@@ -147,6 +148,22 @@ def create_app(config=Config, predictors=None, catalog=None) -> Flask:
             return error(str(exc), 404)
         return send_file(io.BytesIO(data), mimetype=mime_type, download_name=filename)
 
+    @app.get("/api/identity-image")
+    def identity_image():
+        catalog = app.extensions["test_catalog"]
+        if catalog is None:
+            return error(app.extensions["catalog_error"] or "Test dataset is unavailable.", 503)
+        identity = request.args.get("identity", "").strip()
+        if not identity:
+            return error("identity is required.", 400)
+        try:
+            data, filename, mime_type = catalog.identity_image_bytes(identity)
+        except KeyError:
+            return error("Reference image not found for this identity.", 404)
+        except DatasetUnavailableError as exc:
+            return error(str(exc), 404)
+        return send_file(io.BytesIO(data), mimetype=mime_type, download_name=filename)
+
     @app.post("/api/predict")
     def predict():
         model_name = request.form.get("model", config.DEFAULT_MODEL).lower()
@@ -193,6 +210,10 @@ def create_app(config=Config, predictors=None, catalog=None) -> Flask:
                     {
                         "identity": candidate["identity"],
                         "confidence": round(candidate["confidence"], 6),
+                        "image_url": (
+                            "/api/identity-image?identity="
+                            f"{quote(candidate['identity'], safe='')}"
+                        ),
                     }
                     for candidate in prediction["top_k"]
                 ],
