@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4173:5000"
+    volumes:
+      - kaggle-cache:/data/kagglehub
+      - ./data:/app/data:ro
+
+volumes:
+  kaggle-cache:

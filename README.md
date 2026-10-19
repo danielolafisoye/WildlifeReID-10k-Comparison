@@ -57,34 +57,27 @@ git clone <repository-url>
 cd WildlifeReID-10k-Comparison
 git lfs install
 git lfs pull
-docker compose up --build
+docker compose up -d
 ```
 
-Open <http://localhost:4173>. The first build takes several minutes
-(PyTorch is large); later starts are quick with `docker compose up`.
-Stop with `Ctrl+C`, or `docker compose down` if it runs in the background
-(`docker compose up -d`).
+Run these commands in the project folder (the one containing
+`compose.yaml`). Open <http://localhost:4173>. The first start builds the
+image and takes several minutes (PyTorch is large); later starts are quick.
+Use `docker compose up` instead to see the logs in the terminal (stop with
+`Ctrl+C`), and `docker compose down` to stop it. After changing the code,
+rebuild with `docker compose up -d --build`.
 
 Everything runs in one container: Flask serves both the API and the built
 React app, on CPU, with both models included. Test images are downloaded
 from Kaggle on demand and kept in the `kaggle-cache` volume.
-
-Optional settings go in a `.env` file next to `docker-compose.yml`:
-
-```bash
-APP_PORT=8080            # use another port if 4173 is taken
-REID_DEFAULT_MODEL=miewid
-KAGGLE_USERNAME=...      # only if Kaggle asks for authentication
-KAGGLE_KEY=...
-```
 
 If you already have the dataset, put it in `data/wildlifereid-10k/` (or
 `data/archive.zip`) and it is used instead of Kaggle.
 
 Troubleshooting:
 
-- **Build fails with "Git LFS pointers"**: run `git lfs install` and
-  `git lfs pull`, then build again.
+- **Model fails to load**: the weights are Git LFS files. Run
+  `git lfs install` and `git lfs pull`, then `docker compose up -d --build`.
 - **"Test dataset is unavailable"**: the container could not reach Kaggle.
   Uploading your own image still works.
 - **First prediction is slow**: the model loads on first use.
